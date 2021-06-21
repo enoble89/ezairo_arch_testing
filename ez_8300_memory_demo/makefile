@@ -1,1 +1,0 @@
-gcc -o ezairo_memory ezairo_memory.c mpo.c x_mem.c
