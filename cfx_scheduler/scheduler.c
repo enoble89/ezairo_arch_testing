@@ -3,6 +3,7 @@
 #include "scheduler.h"
 #include "task_list.h"
 
+
 #define TICK_SAMPLE_RATE 3000
 #define SAMPLE_RATE_TO_TICKS(x) (TICK_SAMPLE_RATE/x)
 #define DELAY_MS_TO_TICKS(x) (x/TICK_PERIOD)
@@ -23,6 +24,8 @@ static int s_scheduler_trigger = 0;
 static scheduler_task_control_block_t scheduler_tcb_table[SCHEDULER_TASK_INDEX__COUNT] = {
     {.func_pointer=task_filterbank, .status=SCHEDULER_TASK_STATUS_DONE, .ticks_till_release=START_DELAY_1, .period_ticks=SAMPLE_RATE_TO_TICKS(1500), },
     {.func_pointer=task_aux_out, .status=SCHEDULER_TASK_STATUS_DONE, .ticks_till_release=START_DELAY_2, .period_ticks=SAMPLE_RATE_TO_TICKS(3000) },
+    {.func_pointer=task_aux_out, .status=SCHEDULER_TASK_STATUS_DONE, .ticks_till_release=START_DELAY_2, .period_ticks=SAMPLE_RATE_TO_TICKS(3000) },
+    {.func_pointer=task_aux_out, .status=SCHEDULER_TASK_STATUS_DONE, .ticks_till_release=START_DELAY_2, .period_ticks=SAMPLE_RATE_TO_TICKS(3000) },
     {.func_pointer=task_noise_reduction, .status=SCHEDULER_TASK_STATUS_DONE, .ticks_till_release=START_DELAY_1, .period_ticks=SAMPLE_RATE_TO_TICKS(600) },
 };
 
@@ -32,26 +35,26 @@ static void sleep()
     return;
 }
 
-static int run_tasks()
-{
-    task_list_reset(); // Reset read pointer so we can start with the higher priority tasks
-    scheduler_task_control_block_t *curr_task = (scheduler_task_control_block_t*) task_list_next();
-    while (curr_task != NULL)
-    {
-        if (curr_task->status == SCHEDULER_TASK_STATUS_READY)
-        {
-            task_func func_pointer = curr_task->func_pointer;
-            curr_task->status = func_pointer();
+// static int run_tasks()
+// {
+//     task_list_reset(); // Reset read pointer so we can start with the higher priority tasks
+//     scheduler_task_control_block_t *curr_task = (scheduler_task_control_block_t*) task_list_next();
+//     while (curr_task != NULL)
+//     {
+//         if (curr_task->status == SCHEDULER_TASK_STATUS_READY)
+//         {
+//             task_func func_pointer = curr_task->func_pointer;
+//             curr_task->status = func_pointer();
 
-            if (curr_task->status == SCHEDULER_TASK_STATUS_DONE) {
-                // returns 0 if there are not tasks left
-                return task_list_remove((void*) curr_task);
-            }
-        }
-        curr_task = (scheduler_task_control_block_t*) task_list_next();
-    }
-    return 0;
-}
+//             if (curr_task->status == SCHEDULER_TASK_STATUS_DONE) {
+//                 // returns 0 if there are not tasks left
+//                 return task_list_remove((void*) curr_task);
+//             }
+//         }
+//         curr_task = (scheduler_task_control_block_t*) task_list_next();
+//     }
+//     return 0;
+// }
 
 void scheduler_trigger()
 {
@@ -62,27 +65,80 @@ void scheduler_process()
 {
     if (s_scheduler_trigger)
     {
-        printf("New scheduler trigger\n");
         s_scheduler_trigger = 0;
-        task_list_clear();
+        linked_list_t tasks_to_run;
+        task_list_init(&tasks_to_run);
+
         // Let's schedule some work!
-        for (int i = 0; i < SCHEDULER_TASK_INDEX__COUNT; i ++)  // ensure this is a software loop
+        for (int i = 0; i < MAX_NUM_TASKS; i++)
         {
             if (--scheduler_tcb_table[i].ticks_till_release == 0)
             {
-                if (scheduler_tcb_table[i].status != SCHEDULER_TASK_STATUS_DONE)
-                {
-                    printf("FAILED TO SCHEDULE TASK\n");
-                }
                 scheduler_tcb_table[i].ticks_till_release = scheduler_tcb_table[i].period_ticks;
                 scheduler_tcb_table[i].status = SCHEDULER_TASK_STATUS_READY;
-                task_list_add(&scheduler_tcb_table[i]);
+
+                linked_list_node_t *new_node = &(tasks_to_run.nodes[tasks_to_run.write_idx++]);
+                new_node->data = &scheduler_tcb_table[i];
+                new_node->next_node = NULL;
+                new_node->prev_node = NULL;
+
+                tasks_to_run.num_elements++;
+
+                if (tasks_to_run.num_elements == 1)
+                {
+                    tasks_to_run.head = new_node;
+                } else {
+                    tasks_to_run.nodes[tasks_to_run.num_elements - 2].next_node = new_node;
+                    new_node->prev_node = &tasks_to_run.nodes[tasks_to_run.num_elements - 2];
+                }
             }
         }
 
-        // Run tasks until they are all finished.
-        while(run_tasks()) {}
 
+        // for (int i = 0; i < MAX_NUM_TASKS; i++)
+        // {
+        //     scheduler_task_control_block_t curr_task = scheduler_tcb_table[i];
+        //     if (scheduler_tcb_table[i].status == SCHEDULER_TASK_STATUS_READY) chess_frequent_then
+        //     {
+        //         task_func func_pointer = scheduler_tcb_table[i].func_pointer;
+        //         scheduler_tcb_table[i].status = func_pointer();
+
+        //         // if (curr_task->status == SCHEDULER_TASK_STATUS_DONE) {
+        //         //     task_list_remove((void*) curr_task, &tasks_to_run);
+        //         // }
+        //     }
+        // }
+            
+        //     {
+        //         if (scheduler_tcb_table[i].status != SCHEDULER_TASK_STATUS_DONE) chess_frequent_else
+        //         {
+        //             // ERROR: Failed to scheduler task
+        //             debug_gpio_toggle(GPIO_DEBUG_PIN_15);
+        //         }
+
+        //     }
+
+        // }
+
+        // Run tasks until they are all finished.
+
+        while(tasks_to_run.num_elements > 0)
+        {
+            linked_list_node_t *curr_node = (linked_list_node_t*) tasks_to_run.head;
+            while (curr_node != NULL)
+            {
+                scheduler_task_control_block_t *curr_task = (scheduler_task_control_block_t*) curr_node->data;
+                if (curr_task->status == SCHEDULER_TASK_STATUS_READY)
+                {
+                    task_func func_pointer = curr_task->func_pointer;
+                    curr_task->status = func_pointer();
+
+                    if (curr_task->status == SCHEDULER_TASK_STATUS_DONE) {
+                        task_list_remove(curr_node, &tasks_to_run);
+                    }
+                }
+                curr_node = curr_node->next_node;
+            }
+        }
     }
-    sleep(); // Returns when there is an interrupt
 }

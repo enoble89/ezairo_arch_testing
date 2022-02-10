@@ -5,10 +5,23 @@
 
 #define MAX_NUM_TASKS 10
 
-int task_list_remove(void *data);
-void task_list_add(void *data);
-void* task_list_next();
-void task_list_reset();
-void task_list_clear();
+typedef struct linked_list_node_t linked_list_node_t;
+
+struct linked_list_node_t {
+    void *data;
+    linked_list_node_t *next_node;
+    linked_list_node_t *prev_node;
+};
+
+typedef struct {
+    linked_list_node_t nodes[MAX_NUM_TASKS];
+    uint8_t write_idx;
+    linked_list_node_t *head;
+    uint8_t num_elements;
+} linked_list_t;
+
+
+void task_list_remove(linked_list_node_t *node, linked_list_t *linked_list);
+void task_list_init();
 
 #endif // TASK_LIST_H
